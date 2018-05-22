@@ -5,10 +5,15 @@ from PyQt5.QtGui import QTextCursor, QTextDocument
 from PyQt5.QtCore import pyqtSignal, QObject
 # from PyQt5.Qt import QUrl, QImage
 from PyQt5.Qt import QPixmap, QImage # 加载图片
-from PIL import Image
-import socket
 
+from PIL import Image
+from PIL.ImageQt import ImageQt
+import socket
+import time
+from cliSock import cliSock
+from serSock import  serSock
 from test import Ui_MainWindow
+
 
 IMAGE = '1'
 TEXT = '2'
@@ -33,17 +38,25 @@ class Function(Ui_MainWindow, QMainWindow):
         self.__state = None
         self.__IP = None
         self.__port = None
-        self.__Sock = None
+
+        self.__SockObj = None # cliSock 或 serSock 对象
+        self.__sock = None # 传输用的socket
+
         self.__path = None
-        self.__busy = False
+        self.__isBusy = False
         self.__errTimes = 0
 
-        self.conButton.cliked.connect(self.__setConn)
+        self.__image = None
+        self.__text = None
+
+        self.conButton.clicked.connect(self.__setConn)
         self.disButton.clicked.connect(self.__disConn)
         self.restButton.clicked.connect(self.__clear)
         self.cli_but.clicked.connect(self.__setClient)
         self.ser_but.clicked.connect(self.__setServe)
         self.setGraph.clicked.connect(self.__selectGraph)
+        self.sendGraph.clicked.connect(self.__sendGraph)
+        self.sendText.clicked.connect(self.__sendText)
 
     def __statsErr(self):
         # 没有选 客户端 或 服务端 的错误信息
@@ -67,67 +80,59 @@ class Function(Ui_MainWindow, QMainWindow):
         self.Port.setText('')
 
     def __setConn(self):
-        # 检测是否设置了 IP 与 port
-        if self.Add.text() == None or self.Port.text() == None :
-            self.__AddErr()
-        else :
-            self.__IP = self.Add.text()
-            self.__port = self.Port.text()
-
-        # 检测是否选择了 服务类型
         if self.__state == None:
+            # 未选择类型
             self.__statsErr()
-            return
-        if self.__state == 'Serve' : # 设为 服务端
+            return False
+
+        self.__IP = self.Add.text()
+        self.__port = int(self.Port.text())
+
+        if self.__state == 'Serve': # 建立服务端
             try:
-                self.__Sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-                self.__Sock.bind((self.__IP, self.__port))
-                self.__Sock.listen(1)  # 先随便设一个 应该没问题
-                self.textDisp.setText("Serve start successfully! \n Waiting for connection.....\n")
-
+                self.__SockObj = serSock(self.__IP, self.__port)
+                if self.__SockObj.setConnect():
+                    self.__sock = self.__SockObj.sock
+                    self.__monitorSer()
+                    pass
+                else:
+                    # 无法建立联接
+                    pass
             except:
-                QMessageBox.warning(self, 'Connection Error',
-                                    'Can not set Connection \n check whether you IP and Port is Valid')
-                self.__Sock.shutdown(2)
-                self.__Sock.close()
-                self.__Sock = None
-
-        else :  # 设为 客户端
-            self.cli_but.setDisabled(True)
-            self.ser_but.setDisabled(True)
-
-            pass
-
-    def __serSock(self):
-        # 服务端工作开始
-        while True:
-            conn, add = self.__Sock.accept()
-            self.textDisp.append('Get connection from', add[0], ':', add[1])
-            while True:
-
-                kind = conn.decode()
-
-                pass
-        pass
+                self.__AddErr()
+        else: # 建立客户端
+            try:
+                self.__SockObj = cliSock(self.__IP, self.__port)
+                if self.__SockObj.setConnect():
+                    self.__sock = self.__SockObj.sock
+                    self.__monitorCli()
+                    pass
+                else:
+                    # 无法建立连接
+                    pass
+            except:
+                self.__AddErr()
 
     def __disConn(self, state):
         #  断开链接
-        if self.__Sock == None : # 未建立连接
+        if self.__SockObj is None: # 未建立连接
             return
 
         button = QMessageBox.information(self, 'Interrupt Serve', 'Are you sure to interrupt the serve?',
                                          QMessageBox.Ok | QMessageBox.No)
         if button == QMessageBox.Ok:
+            self.__SockObj.disConnect()
+
             self.__state = state
             self.__busy = False
-            self.__Sock.shutdown(2)
-            self.__Sock.close()
-            self.__Sock = None
+            # self.__Sock.shutdown(2)
+            # self.__Sock.close()
+            self.__SockObj = None
             self.textDisp.setText("Connection Interrupt!\n")
             self.__IP = None
             self.__port = None
-            self.cli_but.setDisabled(True)
-            self.ser_but.setDisabled(True)
+            self.cli_but.setDisabled(False)
+            self.ser_but.setDisabled(False)
 
     def __setClient(self):
         # 设置状态为 客户端
@@ -144,23 +149,11 @@ class Function(Ui_MainWindow, QMainWindow):
         self.__path = QFileDialog.getOpenFileName(self, "Select Graph", "","Image(*.jpg)")[0]
         self.__showGraph()
 
+    def __getText(self):
+        return self.textEdit.toPlainText()
+
     def __showGraph(self):
         self.graphDisp.setPixmap(QPixmap.fromImage(QImage(self.__path)))
-
-    def __parCont(self, cont):
-        '''
-        input:
-            cont: python bytes 类型 需要decode 得到字符串
-        '''
-        kind = cont.decode()
-        if kind == IMAGE : # IMAGE
-            return
-            pass
-        elif kind == TEXT :
-            pass
-        else: # 无法接续 报错
-            self.__errTimes += 1
-            pass
 
     def __sendError(self, kind):
         '''
@@ -168,13 +161,159 @@ class Function(Ui_MainWindow, QMainWindow):
         input:
             kind: int类型 表示错误类型
         '''
-
         pass
 
     def __sendGraph(self):
-        if self.__Sock == None:
-            pass
+        if self.__SockObj is None:
+            return False
+        self.__selectGraph()
+        self.__SockObj.sendImage(self.__path)
 
     def __sendText(self):
-        if self.__Sock == None :
-            pass
+        if self.__SockObj is None :
+            return False
+        text = self.__getText()
+        self.__SockObj.sendText(text)
+
+    def __monitorSer(self):
+        while True:  # 开始监听
+            if self.__isBusy == True:  # 如果有任务 等待
+                # time.sleep(30)
+                continue
+
+            self.__isBusy = True  # 设置监听
+            try:
+                conn = self.__sock.recv(1024)
+                head = conn.decode()  # 假设流程正常 conn 应该为一个 header
+
+                if head == 'BEATS':  # 收到心跳
+                    try:
+                        self.__sock.send('BEATS'.encode())
+                    except:
+                        # 无法回复心跳
+                        pass
+
+                elif head[0] != 'H':  # 不是header
+                    # header 错误
+                    pass
+                else:
+                    kind = head.split('-')[1]
+
+                    if kind == 'TEXT':
+                        length = int(head.split('-')[2])
+                        self.__sock.send(conn)  # 回发 conn 确认
+
+                        while True:
+                            try:
+                                conn = self.__sock.recv(length)
+                                text = conn.decode()
+                                if len(text) == length:
+                                    self.__sock.send(str(length).encode())
+                                    self.text = text
+                                    self.textDisp.setText(text)
+                                    print(text, '\n')
+                                    break
+                                else:
+                                    # 未接到正确信息
+                                    pass
+                            except:
+                                # 未接到信息
+                                pass
+
+                    elif kind == 'IMAGE':
+                        mode = head.split('-')[1]
+                        size = (int(head.split('-')[2]), int(head.split('-')[3]))
+                        length = int(head.split('-')[-1])
+                        self.__sock.send(conn)  # 回发 conn 确认
+
+                        while True:
+                            try:
+                                conn = self.__sock.recv(length)
+                                image = conn.decode()  # 原始图像
+                                if len(image) == length:
+                                    self.__sock.send(str(length).encode())
+                                    self.__image = Image.frombytes(mode, size, image)
+                                    qim = ImageQt(self.__image)
+                                    self.graphDisp.setPixmap(QPixmap.fromImage(qim))
+                                    break
+                                else:
+                                    # 未收到正确信息
+                                    pass
+                            except:
+                                pass
+                    else:
+                        # header 错误
+                        pass
+                self.__isBusy = False
+                time.sleep(5)
+            except:
+                self.__isBusy = False
+                time.sleep(5)
+
+    def __monitorCli(self):
+        while True:  # 开始监听
+            if self.__isBusy == True : # 如果有任务 等待
+                # time.sleep(30)
+                continue
+
+            self.__isBusy = True # 设置监听
+            try:
+                conn = self.__sock.recv(1024)
+                head = conn.decode() # 假设流程正常 conn 应该为一个 header
+                if head[0] != 'H':
+                    # header 错误
+                    pass
+                else :
+                    kind = head.split('-')[1]
+
+                    if kind == 'TEXT' :
+                        length = conn.split('-')[2]
+                        self.__sock.send(conn) # 回发 conn 确认
+
+                        while True:
+                            try:
+                                conn = self.__sock.recv(length)
+                                text = conn.decode()
+                                if len(text) == length:
+                                    self.__sock.send(str(length).encode())
+                                    self.__text = text
+                                    self.textDisp.setText(self.__text)
+                                    print(text, '\n')
+                                    break
+                                else :
+                                    # 未接到正确信息
+                                    pass
+                            except:
+                                # 未接到信息
+                                pass
+
+                    elif kind == 'IMAGE' :
+                        mode = head.split('-')[1]
+                        size = (int(head.split('-')[2]), int(head.split('-')[3]))
+                        length = head.split('-')[-1]
+                        self.__sock.send(conn) # 回发 conn 确认
+
+                        while True :
+                            try:
+                                conn = self.__sock.recv(length)
+                                image = conn.decode()
+                                if len(image) == length :
+                                    self.__sock.send(str(length))
+                                    self.__image = Image.frombytes(mode, size, image)
+                                    qim = ImageQt(self.__image)
+                                    self.graphDisp.setPixmap(QPixmap.fromImage(qim))
+                                else:
+                                    # 未收到正确信息
+                                    pass
+                            except:
+                                pass
+                    else :
+                        # header 错误
+                        pass
+                self.__isBusy = False
+                time.sleep(30)
+            except:
+                # 对方未发送 进行一次心跳
+                self.__heartBeats()
+                self.__isBusy = False
+                time.sleep(30)

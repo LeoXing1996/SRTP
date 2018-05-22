@@ -9,14 +9,14 @@ class Sock:
         self.__IP = IP
         self.__port = port
         self.__add = (self.__IP, self.__port)
-        self.__Sock = None
+        self.__sock = None
         self.__isBusy = False
         self.__errLimit = retryTimes
         self.__timeout = timeout
         self.__encryption = Encrypt()
 
-        self.__image = None
-        self.__text = None
+        self.image = None
+        self.text = None
 
     def setConnect(self):
         # 随子类方法变动
@@ -31,7 +31,7 @@ class Sock:
 
             self.__isBusy = True # 设置监听
             try:
-                conn = self.__Sock.recv(1024)
+                conn = self.__sock.recv(1024)
                 head = conn.decode() # 假设流程正常 conn 应该为一个 header
                 if head[0] != 'H':
                     # header 错误
@@ -41,15 +41,15 @@ class Sock:
 
                     if kind == 'TEXT' :
                         length = conn.split('-')[2]
-                        self.__Sock.send(conn) # 回发 conn 确认
+                        self.__sock.send(conn) # 回发 conn 确认
 
                         while True:
                             try:
-                                conn = self.__Sock.recv(length)
+                                conn = self.__sock.recv(length)
                                 text = conn.decode()
                                 if len(text) == length:
-                                    self.__Sock.send(str(length).encode())
-                                    self.__text = text
+                                    self.__sock.send(str(length).encode())
+                                    self.text = text
                                 else :
                                     # 未接到正确信息
                                     pass
@@ -61,15 +61,15 @@ class Sock:
                         mode = head.split('-')[1]
                         size = (int(head.split('-')[2]), int(head.split('-')[3]))
                         length = head.split('-')[-1]
-                        self.__Sock.send(conn) # 回发 conn 确认
+                        self.__sock.send(conn) # 回发 conn 确认
 
                         while True :
                             try:
-                                conn = self.__Sock.recv(length)
+                                conn = self.__sock.recv(length)
                                 image = conn.decode()
                                 if len(image) == length :
-                                    self.__Sock.send(str(length))
-                                    self.__image = Image.frombytes(mode, size, image)
+                                    self.__sock.send(str(length))
+                                    self.image = Image.frombytes(mode, size, image)
                                 else:
                                     # 未收到正确信息
                                     pass
@@ -89,8 +89,8 @@ class Sock:
 
     def disConnect(self):
         if self.__isBusy == False:
-            self.__Sock.shutdown(2)
-            self.__Sock.close()
+            self.__sock.shutdown(2)
+            self.__sock.close()
         else :
             # 正在工作 无法关闭
             return False
@@ -178,10 +178,10 @@ class Sock:
         errTimes = 0
         while True:
             try:
-                self.__Sock.send(toSend)
+                self.__sock.send(toSend)
                 while True :
                     try:
-                        conn = self.__Sock.recv(1024)
+                        conn = self.__sock.recv(1024)
                         if conn == toConf:
                             return True
                         else:
@@ -215,3 +215,26 @@ class Sock:
         except:
             return None
 
+    @property
+    def IP(self):
+        return self.__IP
+
+    @property
+    def port(self):
+        return self.__port
+
+    @property
+    def add(self):
+        return self.__add
+
+    @property
+    def isBusy(self):
+        return self.__isBusy
+
+    @property
+    def errLimit(self):
+        return self.__errLimit
+
+    @property
+    def timeout(self):
+        return self.__timeout
